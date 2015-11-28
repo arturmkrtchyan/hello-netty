@@ -18,9 +18,6 @@ import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
@@ -31,12 +28,10 @@ public class HelloClient {
     private final StringDecoder stringDecoder = new StringDecoder(CharsetUtil.UTF_8);
     private final StringEncoder stringEncoder = new StringEncoder(CharsetUtil.UTF_8);
 
-
     private ChannelPool channelPool;
     private EventLoopGroup eventLoopGroup;
 
-    private void connect(String host, int port,
-                         int numberOfThreads, int numberOfConnections) {
+    private void connect(String host, int port, int numberOfThreads, int numberOfConnections) {
         eventLoopGroup = new NioEventLoopGroup(numberOfThreads);
 
         Bootstrap bootstrap = new Bootstrap();
@@ -45,18 +40,13 @@ public class HelloClient {
         bootstrap.option(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
         bootstrap.option(ChannelOption.TCP_NODELAY, true);
 
-        bootstrap.group(eventLoopGroup)
-                .channel(NioSocketChannel.class)
-                .remoteAddress(host, port);
-
+        bootstrap.group(eventLoopGroup).channel(NioSocketChannel.class).remoteAddress(host, port);
 
         channelPool = new FixedChannelPool(bootstrap, new AbstractChannelPoolHandler() {
             @Override
             public void channelCreated(Channel ch) {
                 ChannelPipeline pipeline = ch.pipeline();
-
                 // decoders
-                // Add the text line codec combination first,
                 pipeline.addLast("framer", new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()));
                 pipeline.addLast("stringDecoder", stringDecoder);
 
@@ -65,7 +55,6 @@ public class HelloClient {
 
                 // business logic handler
                 pipeline.addLast("clientHandler", new HelloClientHandler(channelPool));
-
             }
         }, numberOfConnections);
     }
@@ -75,26 +64,16 @@ public class HelloClient {
     }
 
     public CompletableFuture<String> send(final String message) {
-        // Sends the message to the server.
         CompletableFuture<String> future = new CompletableFuture<>();
 
-        Future<Channel> f = channelPool.acquire();
-        f.addListener(new FutureListener<Channel>() {
+        Future<Channel> channelFuture = channelPool.acquire();
+        channelFuture.addListener(new FutureListener<Channel>() {
             @Override
             public void operationComplete(Future<Channel> f) {
                 if (f.isSuccess()) {
                     Channel channel = f.getNow();
-                    CompletableFuture<String> previous = channel.attr(HelloClient.FUTURE).getAndSet(future);
-                    if (previous != null) {
-                        System.err.println("Internal error, completion handler should have been null");
-                    }
-                    try {
-                        channel.writeAndFlush(message, channel.voidPromise());
-                    } catch (Exception e) {
-                        CompletableFuture<String> current = channel.attr(HelloClient.FUTURE).getAndRemove();
-                        channelPool.release(channel);
-                        current.completeExceptionally(e);
-                    }
+                    channel.attr(HelloClient.FUTURE).set(future);
+                    channel.writeAndFlush(message, channel.voidPromise());
                 }
             }
         });
@@ -104,40 +83,48 @@ public class HelloClient {
     public static void main(String[] args) throws Exception {
 
         HelloClient client = new HelloClient();
-        client.connect("localhost", 7657, 1, 10);
+        final String host = System.getProperty("host", "localhost");
+        final int port = Integer.valueOf(System.getProperty("port", "7657"));
+        final int threads = Integer.valueOf(System.getProperty("threads", "1"));
+        final int connections = Integer.valueOf(System.getProperty("connections", "10"));
+        final int messages = Integer.valueOf(System.getProperty("messages", "100000"));
+        final int iterations = Integer.valueOf(System.getProperty("iterations", "10"));
+        client.connect(host, port, threads, connections);
 
-        IntStream.range(0, 50).forEach(value -> {
-            List<CompletableFuture<String>> futures = Collections.synchronizedList(new LinkedList<>());
+        IntStream.range(0, iterations).forEach(iteration -> {
+            System.out.println("---------------------Iteration ->" + iteration + "---------------------");
+            System.out.println("Asynchronously sending " + (messages/1000) + "K messages.");
+            CompletableFuture[] futures = new CompletableFuture[messages];
 
             long start = System.currentTimeMillis();
 
-            IntStream.range(0, 1000000).forEach(v -> {
+            IntStream.range(0, messages).forEach(index -> {
                 try {
-                    CompletableFuture<String> f = client.send("Hello from client\n");
-                    futures.add(f);
+                    CompletableFuture<String> future = client.send("Hello from client\n");
+                    futures[index] = future;
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
 
-            System.out.println(System.currentTimeMillis() - start);
+            System.out.println("It took " + (System.currentTimeMillis() - start) +
+                    "ms to asynchronously send " + (messages/1000) + "K messages.");
 
-            CompletableFuture f = CompletableFuture.allOf(futures.toArray(new CompletableFuture[1000000]));
+            System.out.println("Waiting to get responses from server.");
+            CompletableFuture f = CompletableFuture.allOf(futures);
             try {
                 f.get(60, TimeUnit.SECONDS);
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            long end = System.currentTimeMillis();
 
-            System.out.println(end - start);
+            System.out.println("Server handles " + (messages/(System.currentTimeMillis() - start)) +
+                    "K messages per second");
         });
 
         client.disconnect();
 
     }
-
-
 }
 
 
@@ -151,13 +138,8 @@ class HelloClientHandler extends SimpleChannelInboundHandler<String> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, String msg) throws Exception {
-        //System.out.println(msg);
-
         Attribute<CompletableFuture<String>> futureAttribute = ctx.channel().attr(HelloClient.FUTURE);
         CompletableFuture<String> future = futureAttribute.getAndRemove();
-        //System.out.println(ctx.channel().toString() + Thread.currentThread().getName() + " " + msg);
-
-        //Thread.sleep(100);
 
         channelPool.release(ctx.channel(), ctx.channel().voidPromise());
         future.complete(msg);

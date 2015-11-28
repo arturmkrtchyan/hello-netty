@@ -13,17 +13,16 @@ import io.netty.handler.codec.string.StringEncoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.SystemPropertyUtil;
 
 public class HelloServer {
-
-    private static final int PORT = 7657;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
 
-    public void start() {
-        bossGroup = new NioEventLoopGroup(1);
-        workerGroup = new NioEventLoopGroup(1);
+    public void start(int port, int bossThreads, int workerThreads) {
+        bossGroup = new NioEventLoopGroup(bossThreads);
+        workerGroup = new NioEventLoopGroup(workerThreads);
         try {
             final ServerBootstrap b = new ServerBootstrap();
             b.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024);
@@ -55,7 +54,7 @@ public class HelloServer {
                         }
                     });
 
-            b.bind(PORT).sync().channel().closeFuture().sync();
+            b.bind(port).sync().channel().closeFuture().sync();
 
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -71,8 +70,13 @@ public class HelloServer {
 
 
     public static void main(final String[] args) {
+
+        final int port = Integer.valueOf(System.getProperty("port", "7657"));
+        final int bossThreads = Integer.valueOf(System.getProperty("bossThreads", "1"));
+        final int workerThreads = Integer.valueOf(System.getProperty("workerThreads", "1"));
+
         final HelloServer server = new HelloServer();
-        server.start();
+        server.start(port, bossThreads, workerThreads);
 
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
     }
