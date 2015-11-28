@@ -21,6 +21,10 @@ public class HelloServer {
     private EventLoopGroup workerGroup;
 
     public void start(int port, int bossThreads, int workerThreads) {
+
+        System.out.println("Boss Threads: " + bossThreads);
+        System.out.println("Worker Threads: " + workerThreads);
+
         bossGroup = new NioEventLoopGroup(bossThreads);
         workerGroup = new NioEventLoopGroup(workerThreads);
         try {
