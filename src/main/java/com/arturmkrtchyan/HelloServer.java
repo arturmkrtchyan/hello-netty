@@ -29,9 +29,11 @@ public class HelloServer {
         workerGroup = new NioEventLoopGroup(workerThreads);
         try {
             final ServerBootstrap b = new ServerBootstrap();
-            b.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024);
-            b.childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
-            b.childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT);
+            //b.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024);
+            //b.childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
+            b.option(ChannelOption.SO_BACKLOG, 1024);
+            b.option(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT);
+            b.childOption(ChannelOption.SO_KEEPALIVE, true);
 
             b.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
